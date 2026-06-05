@@ -110,25 +110,64 @@ SIGNALS).
 
 ## Quickstart
 
+### First time on a new machine
+
 ```powershell
-# 1. Create a venv + install deps
+# 1. Clone the repo
+git clone https://github.com/fmughal101/Eden.git void
+cd void
+
+# 2. Create a venv + install deps
 python -m venv .venv
 .venv\Scripts\activate
-pip install fastapi uvicorn yfinance pandas alpaca-py anthropic pydantic
+pip install -r requirements.txt
 
-# 2. (Optional) set API keys
-$env:ANTHROPIC_API_KEY = "sk-ant-..."          # for the RESEARCH tab
-$env:TV_WEBHOOK_SECRET = "your-shared-secret"   # for the webhook receiver
-# Edit config.py to add Alpaca paper keys for the live bot
+# 3. (Optional) set API keys for the AI / webhook features
+$env:ANTHROPIC_API_KEY = "sk-ant-..."          # RESEARCH tab — Claude
+$env:TV_WEBHOOK_SECRET = "your-shared-secret"   # /webhook/tradingview auth
+# Edit config.py to add Alpaca paper keys for the live bot (optional)
 
-# 3. Run the dashboard
+# 4. Run the dashboard
 python server.py
 # → http://localhost:8000
 ```
 
+On macOS / Linux, swap step 2's activate line for `source .venv/bin/activate`
+and step 3's `$env:NAME = "value"` for `export NAME="value"`.
+
 The dashboard works without any API keys — you'll just get 503s from
-`/api/research` and `/webhook/tradingview` will reject everything, and
-the live bot will be offline until you populate `config.py`.
+`/api/research`, `/webhook/tradingview` will reject everything, and the
+live bot will be offline until you populate `config.py`.
+
+### Subsequent pulls (same machine)
+
+```powershell
+cd void
+git pull
+.venv\Scripts\activate
+pip install -r requirements.txt   # only needed if requirements changed
+python server.py
+```
+
+### Persisting your API keys
+
+`$env:NAME = ...` only sets the variable for the current PowerShell
+session. To make `ANTHROPIC_API_KEY` survive reboots:
+
+```powershell
+[Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")
+# Close + reopen the terminal afterwards.
+```
+
+### What's persisted vs ignored
+
+`.gitignore` excludes the things that should be local-only:
+`.venv/`, `__pycache__/`, `bot.log`, `data.json` (live bot state),
+`journal.db` (signal log), `.env*`, and `*.zip`. Pull will not bring
+those down — they're regenerated on demand. Your custom Alpaca keys in
+`config.py` are NOT git-ignored, so don't commit them as-is. Either
+keep `config.py` with placeholder values and load real keys from env
+vars, or `git update-index --skip-worktree config.py` after editing.
 
 ---
 
