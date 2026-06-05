@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VOID — Trading Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Departure+Mono&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <link rel="stylesheet" href="/static/dashboard.css?v=6" />
+  </head>
+  <body>
+    <!-- ─────────── TOP STATUS BAR ─────────── -->
+    <header class="status-bar">
+      <div class="status-bar__brand">
+        <div class="brand-mark">V</div>
+        <div class="brand-meta">
+          <div class="brand-name">VOID</div>
+          <div class="brand-sub">TRADING ENGINE V0.4</div>
+        </div>
+      </div>
+
+      <div class="status-bar__kpis">
+        <div class="kpi">
+          <div class="kpi__label">EQUITY</div>
+          <div class="kpi__value dot-matrix" id="kpi-equity">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label">P&amp;L</div>
+          <div class="kpi__value dot-matrix" id="kpi-pnl">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label">TRADES</div>
+          <div class="kpi__value dot-matrix" id="kpi-trades">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi__label">WIN</div>
+          <div class="kpi__value dot-matrix" id="kpi-winrate">—</div>
+        </div>
+      </div>
+
+      <div class="status-bar__right">
+        <div class="signal-pill" id="signal-indicator">— HOLD</div>
+        <div class="status-pill">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-label">OFFLINE</span>
+        </div>
+        <div class="clock dot-matrix" id="clock">--:--:--</div>
+      </div>
+    </header>
+
+    <!-- ─────────── TICKER TAPE ─────────── -->
+    <div class="ticker">
+      <div class="ticker__track" id="ticker-track">
+        <!-- populated by ticker.js -->
+      </div>
+    </div>
+
+    <!-- ─────────── TABS ─────────── -->
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="live">
+        <span class="tab-bracket">[</span>LIVE<span class="tab-bracket">]</span>
+      </button>
+      <button class="tab-btn" data-tab="backtest">
+        <span class="tab-bracket">[</span>BACKTEST<span class="tab-bracket"
+          >]</span
+        >
+      </button>
+      <button class="tab-btn" data-tab="signals">
+        <span class="tab-bracket">[</span>SIGNALS<span class="tab-bracket"
+          >]</span
+        >
+      </button>
+      <button class="tab-btn" data-tab="research">
+        <span class="tab-bracket">[</span>RESEARCH<span class="tab-bracket"
+          >]</span
+        >
+      </button>
+      <div class="tabs__spacer"></div>
+      <div class="tabs__meta">
+        <span id="bot-title">SMA CROSSOVER · SPY</span>
+        <span class="tabs__meta-sep">/</span>
+        <span id="last-updated">AWAITING DATA</span>
+      </div>
+    </nav>
+
+    <main class="canvas">
+      <!-- ═════════════════ LIVE TAB ═════════════════ -->
+      <section id="tab-live" class="tab-content active">
+        <div class="grid-2">
+          <div class="cell">
+            <div class="cell__label">▸ PORTFOLIO VALUE</div>
+            <div class="cell__big dot-matrix" id="portfolio-val">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ TOTAL RETURN</div>
+            <div class="cell__big dot-matrix" id="total-return">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ CURRENT PRICE</div>
+            <div class="cell__big dot-matrix" id="current-price">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ SHARES HELD</div>
+            <div class="cell__big dot-matrix" id="shares-held">—</div>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card__head">
+            <div class="chart-card__title">▸ PRICE / SIGNALS</div>
+            <div class="chart-card__legend" id="live-legend"></div>
+          </div>
+          <div class="chart-wrap">
+            <canvas
+              id="priceChart"
+              role="img"
+              aria-label="Live price chart"
+            ></canvas>
+          </div>
+          <div class="chart-wrap chart-wrap--osc chart-wrap--empty" id="live-osc-wrap">
+            <canvas
+              id="liveOscChart"
+              role="img"
+              aria-label="Live oscillator chart"
+            ></canvas>
+          </div>
+        </div>
+
+        <div class="grid-split">
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ RECENT TRADES</span>
+              <span class="panel__sub">TAIL · 8</span>
+            </div>
+            <div id="trade-log" class="terminal-table">
+              <div class="no-data">NO TRADES YET</div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ PARAMETERS</span>
+            </div>
+            <div id="params" class="param-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════ BACKTEST TAB ═════════════════ -->
+      <section id="tab-backtest" class="tab-content">
+        <div class="panel">
+          <div class="panel__head">
+            <span class="panel__title">▸ CONFIGURATION</span>
+            <span class="panel__sub" id="bt-strategy-desc"
+              >SELECT A STRATEGY</span
+            >
+          </div>
+          <form id="backtest-form" class="param-bar">
+            <label class="param-cell">
+              <span class="param-cell__num">01</span>
+              <span class="param-cell__name">STRATEGY</span>
+              <select
+                name="strategy"
+                id="bt-strategy"
+                class="param-cell__input"
+              ></select>
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">02</span>
+              <span class="param-cell__name">SYMBOL</span>
+              <input
+                name="symbol"
+                value="SPY"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <div id="bt-strategy-params" class="param-cell-group"></div>
+            <label class="param-cell">
+              <span class="param-cell__num">SL</span>
+              <span class="param-cell__name">STOP LOSS</span>
+              <span class="param-cell__suffix">%</span>
+              <input
+                type="number"
+                name="stop_loss_pct"
+                value="3"
+                step="0.1"
+                min="0"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">SZ</span>
+              <span class="param-cell__name">POS SIZE</span>
+              <span class="param-cell__suffix">%</span>
+              <input
+                type="number"
+                name="position_size_pct"
+                value="10"
+                step="0.1"
+                min="0"
+                max="100"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">$</span>
+              <span class="param-cell__name">CAPITAL</span>
+              <input
+                type="number"
+                name="initial_capital"
+                value="10000"
+                min="100"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">PD</span>
+              <span class="param-cell__name">PERIOD</span>
+              <select name="period" class="param-cell__input">
+                <option value="6mo">6 MONTHS</option>
+                <option value="1y">1 YEAR</option>
+                <option value="2y" selected>2 YEARS</option>
+                <option value="5y">5 YEARS</option>
+                <option value="10y">10 YEARS</option>
+              </select>
+            </label>
+            <button type="submit" id="bt-run" class="run-btn">
+              ▸ RUN BACKTEST
+            </button>
+          </form>
+          <p id="bt-status" class="bt-status"></p>
+        </div>
+
+        <div id="bt-results" style="display: none">
+          <div class="grid-4">
+            <div class="cell">
+              <div class="cell__label">▸ TOTAL RETURN</div>
+              <div class="cell__big dot-matrix" id="bt-total-return">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ FINAL CAPITAL</div>
+              <div class="cell__big dot-matrix" id="bt-final-capital">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ WIN RATE</div>
+              <div class="cell__big dot-matrix" id="bt-win-rate">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ # TRADES</div>
+              <div class="cell__big dot-matrix" id="bt-num-trades">—</div>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card__head">
+              <div class="chart-card__title">▸ EQUITY / SIGNALS</div>
+              <div class="chart-card__legend" id="bt-legend"></div>
+            </div>
+            <div class="chart-wrap">
+              <canvas
+                id="bt-chart"
+                role="img"
+                aria-label="Backtest chart"
+              ></canvas>
+            </div>
+            <div class="chart-wrap chart-wrap--osc chart-wrap--empty" id="bt-osc-wrap">
+              <canvas
+                id="bt-osc-chart"
+                role="img"
+                aria-label="Backtest oscillator chart"
+              ></canvas>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ TRADE LOG</span>
+              <span class="panel__sub">EXECUTION HISTORY</span>
+            </div>
+            <div id="bt-trade-log" class="terminal-table">
+              <div class="no-data">NO TRADES</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════ SIGNALS TAB ═════════════════ -->
+      <section id="tab-signals" class="tab-content">
+        <div class="grid-4">
+          <div class="cell">
+            <div class="cell__label">▸ TOTAL SIGNALS</div>
+            <div class="cell__big dot-matrix" id="sig-total">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ RECEIVED</div>
+            <div class="cell__big dot-matrix" id="sig-received">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ EXECUTED</div>
+            <div class="cell__big dot-matrix" id="sig-executed">—</div>
+          </div>
+          <div class="cell">
+            <div class="cell__label">▸ REJECTED</div>
+            <div class="cell__big dot-matrix" id="sig-rejected">—</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel__head">
+            <span class="panel__title">▸ SIGNAL LOG</span>
+            <span class="panel__sub" id="sig-updated">—</span>
+          </div>
+          <div id="signal-log" class="terminal-table">
+            <div class="no-data">NO SIGNALS RECEIVED YET</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═════════════════ RESEARCH TAB ═════════════════ -->
+      <section id="tab-research" class="tab-content">
+        <div class="panel">
+          <div class="panel__head">
+            <span class="panel__title">▸ TICKER RESEARCH</span>
+            <span class="panel__sub">FUNDAMENTALS · WEB · CLAUDE</span>
+          </div>
+          <form id="research-form" class="research-form">
+            <input
+              id="research-symbol"
+              name="symbol"
+              placeholder="ENTER SYMBOL (e.g. AAPL)"
+              required
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="16"
+              class="research-form__input"
+            />
+            <button type="submit" id="research-submit" class="run-btn">
+              ▸ RESEARCH
+            </button>
+          </form>
+          <p id="research-status" class="bt-status"></p>
+        </div>
+
+        <div id="research-result"></div>
+      </section>
+    </main>
+
+    <!-- ─────────── BOTTOM SYSTEM BAR ─────────── -->
+    <footer class="system-bar" data-tab="live">
+      <!-- Always visible (cosmetic / system) -->
+      <span class="sys-cell"
+        ><span class="sys-cell__k">PID</span>
+        <span class="sys-cell__v">84291</span></span
+      >
+      <span class="sys-cell"
+        ><span class="sys-cell__k">SEED</span>
+        <span class="sys-cell__v">0x0e1d</span></span
+      >
+      <span class="sys-cell"
+        ><span class="sys-cell__k">DUCKDB</span>
+        <span class="sys-cell__v">41.8 GB</span></span
+      >
+
+      <!-- LIVE-only -->
+      <span class="sys-cell sys-cell--tab" data-tab="live"
+        ><span class="sys-cell__k">STRATEGY</span>
+        <span class="sys-cell__v" id="sys-strategy">sma_crossover</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="live"
+        ><span class="sys-cell__k">LATENCY</span>
+        <span class="sys-cell__v" id="sys-latency">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="live"
+        ><span class="sys-cell__k">SIGNAL</span>
+        <span class="sys-cell__v" id="sys-signal">HOLD</span></span
+      >
+
+      <!-- BACKTEST-only -->
+      <span class="sys-cell sys-cell--tab" data-tab="backtest"
+        ><span class="sys-cell__k">STRATEGY</span>
+        <span class="sys-cell__v" id="bt-sys-strategy">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="backtest"
+        ><span class="sys-cell__k">PERIOD</span>
+        <span class="sys-cell__v" id="bt-sys-period">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="backtest"
+        ><span class="sys-cell__k">LAST RUN</span>
+        <span class="sys-cell__v" id="bt-sys-lastrun">—</span></span
+      >
+
+      <!-- SIGNALS-only -->
+      <span class="sys-cell sys-cell--tab" data-tab="signals"
+        ><span class="sys-cell__k">SOURCE</span>
+        <span class="sys-cell__v" id="sig-sys-source">TRADINGVIEW</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="signals"
+        ><span class="sys-cell__k">TODAY</span>
+        <span class="sys-cell__v" id="sig-sys-today">0</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="signals"
+        ><span class="sys-cell__k">LAST</span>
+        <span class="sys-cell__v" id="sig-sys-last">—</span></span
+      >
+
+      <!-- RESEARCH-only -->
+      <span class="sys-cell sys-cell--tab" data-tab="research"
+        ><span class="sys-cell__k">MODEL</span>
+        <span class="sys-cell__v" id="rsh-sys-model">OPUS 4.7</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="research"
+        ><span class="sys-cell__k">TICKER</span>
+        <span class="sys-cell__v" id="rsh-sys-ticker">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="research"
+        ><span class="sys-cell__k">RATING</span>
+        <span class="sys-cell__v" id="rsh-sys-rating">—</span></span
+      >
+
+      <!-- Always visible (right) -->
+      <span class="sys-cell sys-cell--right"
+        ><span class="sys-cell__k">RUNTIME</span>
+        <span class="sys-cell__v dot-matrix" id="sys-runtime"
+          >00:00:00</span
+        ></span
+      >
+    </footer>
+
+    <script src="/static/js/utils.js?v=2"></script>
+    <script src="/static/js/clock.js"></script>
+    <script src="/static/js/ticker.js?v=2"></script>
+    <script src="/static/js/tabs.js"></script>
+    <script src="/static/js/footer.js?v=1"></script>
+    <script src="/static/js/live.js?v=3"></script>
+    <script src="/static/js/composite_builder.js?v=2"></script>
+    <script src="/static/js/backtest.js?v=4"></script>
+    <script src="/static/js/signals.js?v=2"></script>
+    <script src="/static/js/research.js?v=1"></script>
+  </body>
+</html>
