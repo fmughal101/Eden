@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VOID — Trading Engine</title>
+    <title>Eden — Trading Engine</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,15 +11,15 @@
       rel="stylesheet"
     />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-    <link rel="stylesheet" href="/static/dashboard.css?v=6" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=12" />
   </head>
   <body>
     <!-- ─────────── TOP STATUS BAR ─────────── -->
     <header class="status-bar">
       <div class="status-bar__brand">
-        <div class="brand-mark">V</div>
+        <div class="brand-mark">E</div>
         <div class="brand-meta">
-          <div class="brand-name">VOID</div>
+          <div class="brand-name">EDEN</div>
           <div class="brand-sub">TRADING ENGINE V0.4</div>
         </div>
       </div>
@@ -77,6 +77,11 @@
       </button>
       <button class="tab-btn" data-tab="research">
         <span class="tab-bracket">[</span>RESEARCH<span class="tab-bracket"
+          >]</span
+        >
+      </button>
+      <button class="tab-btn" data-tab="copy">
+        <span class="tab-bracket">[</span>COPY<span class="tab-bracket"
           >]</span
         >
       </button>
@@ -329,7 +334,7 @@
         <div class="panel">
           <div class="panel__head">
             <span class="panel__title">▸ TICKER RESEARCH</span>
-            <span class="panel__sub">FUNDAMENTALS · WEB · CLAUDE</span>
+            <span class="panel__sub">FUNDAMENTALS · NEWS · YFINANCE</span>
           </div>
           <form id="research-form" class="research-form">
             <input
@@ -350,6 +355,12 @@
         </div>
 
         <div id="research-result"></div>
+      </section>
+
+      <!-- ═════════════════ COPY TAB ═════════════════ -->
+      <section id="tab-copy" class="tab-content">
+        <div id="copy-leaderboard"></div>
+        <div id="copy-detail" style="display:none"></div>
       </section>
     </main>
 
@@ -413,16 +424,30 @@
 
       <!-- RESEARCH-only -->
       <span class="sys-cell sys-cell--tab" data-tab="research"
-        ><span class="sys-cell__k">MODEL</span>
-        <span class="sys-cell__v" id="rsh-sys-model">OPUS 4.7</span></span
+        ><span class="sys-cell__k">SOURCE</span>
+        <span class="sys-cell__v">YFINANCE</span></span
       >
       <span class="sys-cell sys-cell--tab" data-tab="research"
         ><span class="sys-cell__k">TICKER</span>
         <span class="sys-cell__v" id="rsh-sys-ticker">—</span></span
       >
       <span class="sys-cell sys-cell--tab" data-tab="research"
-        ><span class="sys-cell__k">RATING</span>
-        <span class="sys-cell__v" id="rsh-sys-rating">—</span></span
+        ><span class="sys-cell__k">PRICE</span>
+        <span class="sys-cell__v" id="rsh-sys-price">—</span></span
+      >
+
+      <!-- COPY-only -->
+      <span class="sys-cell sys-cell--tab" data-tab="copy"
+        ><span class="sys-cell__k">CHAMBER</span>
+        <span class="sys-cell__v" id="cpy-sys-chamber">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="copy"
+        ><span class="sys-cell__k">MEMBER</span>
+        <span class="sys-cell__v" id="cpy-sys-member">—</span></span
+      >
+      <span class="sys-cell sys-cell--tab" data-tab="copy"
+        ><span class="sys-cell__k">RETURN</span>
+        <span class="sys-cell__v" id="cpy-sys-return">—</span></span
       >
 
       <!-- Always visible (right) -->
@@ -443,6 +468,7 @@
     <script src="/static/js/composite_builder.js?v=2"></script>
     <script src="/static/js/backtest.js?v=4"></script>
     <script src="/static/js/signals.js?v=2"></script>
-    <script src="/static/js/research.js?v=1"></script>
+    <script src="/static/js/research.js?v=2"></script>
+    <script src="/static/js/copy.js?v=11"></script>
   </body>
 </html>

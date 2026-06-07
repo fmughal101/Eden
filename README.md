@@ -1,4 +1,4 @@
-# VOID — Trading Engine
+# Eden — Trading Engine
 
 A retro-terminal-styled dashboard for designing, backtesting, and paper-trading
 stock strategies — plus an AI-powered ticker research tool that pulls
@@ -20,6 +20,7 @@ paper API. State (portfolio value, positions, recent trades, signals) is
 persisted to `data.json` and streamed to the LIVE tab every 10 seconds.
 
 **Backtesting:** Two strategies ship out of the box:
+
 - `sma_crossover` — golden/death cross on two simple moving averages.
 - `composite` — a custom-built strategy assembled in the browser: pick
   indicators from a library (SMA, EMA, RSI, MACD, Bollinger, ATR),
@@ -96,7 +97,7 @@ SIGNALS).
 
 - **Strategies are auto-discovered.** Drop a `.py` file in `strategies/`
   that exposes `KEY`, `NAME`, `PARAMS`, `INDICATORS`, and a `signals(df,
-  params)` function, and it appears in the backtest dropdown — no
+params)` function, and it appears in the backtest dropdown — no
   registration step.
 - **The backtest engine is stateless.** `backtest.run()` calls
   `strategy.signals(df, params)` then walks the resulting `signal`
@@ -114,8 +115,8 @@ SIGNALS).
 
 ```powershell
 # 1. Clone the repo
-git clone https://github.com/fmughal101/Eden.git void
-cd void
+git clone https://github.com/fmughal101/Eden.git
+cd Eden
 
 # 2. Create a venv + install deps
 python -m venv .venv
@@ -132,6 +133,13 @@ python server.py
 # → http://localhost:8000
 ```
 
+For every new terminal session you just need two commands:
+
+```powershell
+source .venv/bin/activate
+python server.py
+```
+
 On macOS / Linux, swap step 2's activate line for `source .venv/bin/activate`
 and step 3's `$env:NAME = "value"` for `export NAME="value"`.
 
@@ -142,7 +150,7 @@ live bot will be offline until you populate `config.py`.
 ### Subsequent pulls (same machine)
 
 ```powershell
-cd void
+cd Eden
 git pull
 .venv\Scripts\activate
 pip install -r requirements.txt   # only needed if requirements changed
@@ -174,7 +182,7 @@ vars, or `git update-index --skip-worktree config.py` after editing.
 ## Project layout
 
 ```
-void/
+Eden/
 ├── server.py             FastAPI: dashboard host + API + webhooks
 ├── trading_bot.py        Live SMA bot (Alpaca paper)
 ├── backtest.py           Strategy-agnostic backtest engine
@@ -248,15 +256,15 @@ Speculative / longer-term:
 
 ## Stack
 
-| Layer       | Tech                                        |
-|-------------|---------------------------------------------|
-| Backend     | Python 3.11+, FastAPI, uvicorn              |
-| Data        | yfinance (prices + fundamentals + news)     |
-| Trading     | Alpaca paper API (`alpaca-py`)              |
-| AI          | Anthropic Claude (Opus 4.7) + web_search    |
-| Storage     | SQLite (journal), JSON file (live state)    |
-| Frontend    | Plain JS, Chart.js, no build step           |
-| Fonts       | JetBrains Mono, Departure Mono              |
+| Layer    | Tech                                     |
+| -------- | ---------------------------------------- |
+| Backend  | Python 3.11+, FastAPI, uvicorn           |
+| Data     | yfinance (prices + fundamentals + news)  |
+| Trading  | Alpaca paper API (`alpaca-py`)           |
+| AI       | Anthropic Claude (Opus 4.7) + web_search |
+| Storage  | SQLite (journal), JSON file (live state) |
+| Frontend | Plain JS, Chart.js, no build step        |
+| Fonts    | JetBrains Mono, Departure Mono           |
 
 ---
 

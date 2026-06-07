@@ -55,7 +55,7 @@ function buildLegend(legendEl, indicators) {
   `;
 }
 
-// VOID-styled Chart.js: off-black bg, hairline grid, off-white price line,
+// Eden-styled Chart.js: off-black bg, hairline grid, off-white price line,
 // dashed indicators, triangle buy/sell markers.
 function buildChart(canvasId, data) {
   const history = data.price_history || [];

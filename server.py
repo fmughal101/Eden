@@ -30,6 +30,8 @@ import backtest as bt_engine
 import strategies as strategies_pkg
 import journal
 import research as research_module
+import congress_data
+import superinvestor_data
 
 app = FastAPI()
 
@@ -158,8 +160,6 @@ class ResearchRequest(BaseModel):
 
 @app.post("/api/research")
 def research_endpoint(req: ResearchRequest):
-    if not research_module.ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
     try:
         return JSONResponse(research_module.research(req.symbol))
     except LookupError as e:
@@ -287,6 +287,111 @@ def list_signals(limit: int = 100):
         "signals": journal.get_recent_signals(limit=limit),
         "stats":   journal.get_signal_stats(),
     })
+
+
+# ─────────────────────────────────────────────
+#  CONGRESS COPY TRADING
+# ─────────────────────────────────────────────
+
+class SimulateRequest(BaseModel):
+    member_id: str
+    capital: float = 10_000.0
+    sizing: str = "equal"  # "equal" or "amount" (mirror member's disclosed size)
+
+
+@app.get("/api/congress/members")
+def congress_members():
+    try:
+        return JSONResponse({
+            "members": congress_data.member_list(),
+            "mock": congress_data.is_mock(),
+        })
+    except (congress_data.MissingAPIKey, congress_data.APIUnavailable) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/congress/trades")
+def congress_trades(days: int = 180):
+    try:
+        return JSONResponse({"trades": congress_data.fetch_trades(days=days)})
+    except (congress_data.MissingAPIKey, congress_data.APIUnavailable) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/congress/member/{member_id}")
+def congress_member(member_id: str):
+    try:
+        trades = congress_data.attach_trade_prices(congress_data.member_trades(member_id))
+        performance = congress_data.member_performance(member_id)
+        return JSONResponse({"trades": trades, "performance": performance})
+    except (congress_data.MissingAPIKey, congress_data.APIUnavailable) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/congress/simulate")
+def congress_simulate(req: SimulateRequest):
+    try:
+        return JSONResponse(congress_data.simulate_follow(req.member_id, req.capital, sizing=req.sizing))
+    except (congress_data.MissingAPIKey, congress_data.APIUnavailable) as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+#  SUPERINVESTOR (SEC 13F via Dataroma) COPY TRADING
+# ─────────────────────────────────────────────
+#  Second COPY source. Same shapes/contract as the Congress routes above (and the
+#  same SimulateRequest model), so static/js/copy.js can drive both with only a
+#  different apiBase. superinvestor_data reuses the congress_data engine.
+
+@app.get("/api/superinvestors/members")
+def superinvestors_members():
+    try:
+        return JSONResponse({
+            "members": superinvestor_data.member_list(),
+            "mock": superinvestor_data.is_mock(),
+        })
+    except superinvestor_data.APIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/superinvestors/member/{member_id}")
+def superinvestors_member(member_id: str):
+    try:
+        trades = superinvestor_data.attach_trade_prices(superinvestor_data.member_trades(member_id))
+        performance = superinvestor_data.member_performance(member_id)
+        return JSONResponse({"trades": trades, "performance": performance})
+    except superinvestor_data.APIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/superinvestors/simulate")
+def superinvestors_simulate(req: SimulateRequest):
+    try:
+        return JSONResponse(superinvestor_data.simulate_follow(req.member_id, req.capital, sizing=req.sizing))
+    except superinvestor_data.APIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/", response_class=HTMLResponse)

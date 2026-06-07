@@ -1,4 +1,4 @@
-// Research tab — submits a ticker, renders the resulting card.
+// Research tab — free lite version (yfinance only, no AI)
 
 (function () {
   const form = document.getElementById("research-form");
@@ -8,22 +8,15 @@
   const resultEl = document.getElementById("research-result");
   if (!form || !resultEl) return;
 
-  // ── Footer cells (research-tab) ────────────────────────────────────────────
-  function setFooter(ticker, rating) {
+  // ── Footer cells ───────────────────────────────────────────────────────────
+  function setFooter(ticker, price) {
     const t = document.getElementById("rsh-sys-ticker");
-    const r = document.getElementById("rsh-sys-rating");
+    const p = document.getElementById("rsh-sys-price");
     if (t) t.textContent = ticker || "—";
-    if (r) {
-      r.textContent = rating || "—";
-      r.className =
-        "sys-cell__v " +
-        (rating === "BUY" ? "up" : rating === "SELL" ? "down" : "");
-    }
+    if (p) p.textContent = price != null ? fmtDollar(price) : "—";
   }
 
-  // ── Card rendering ─────────────────────────────────────────────────────────
-  // Fundamentals come from yfinance — pretty-print large numbers, percentages
-  // for ratios, and pass through strings.
+  // ── Formatting helpers ─────────────────────────────────────────────────────
   const FUND_FORMAT = {
     marketCap:        (v) => fmtCompactDollar(v),
     trailingPE:       (v) => Number(v).toFixed(2),
@@ -57,13 +50,60 @@
     if (v == null) return "—";
     return (Number(v) * 100).toFixed(2) + "%";
   }
+  function fmtDate(str) {
+    if (!str) return "—";
+    // ISO timestamp → YYYY-MM-DD, unix timestamp → date string
+    if (/^\d+$/.test(str)) {
+      return new Date(Number(str) * 1000).toISOString().slice(0, 10);
+    }
+    return String(str).slice(0, 10);
+  }
 
+  // ── Sparkline (canvas) ─────────────────────────────────────────────────────
+  let sparkChart = null;
+  function renderSparkline(priceHistory) {
+    const canvas = document.getElementById("rsh-sparkline");
+    if (!canvas || !priceHistory || priceHistory.length < 2) return;
+    if (sparkChart) { sparkChart.destroy(); sparkChart = null; }
+    const labels = priceHistory.map(p => p.date);
+    const values = priceHistory.map(p => p.close);
+    const first = values[0];
+    const last = values[values.length - 1];
+    const color = last >= first ? getComputedStyle(document.documentElement).getPropertyValue("--green").trim()
+                               : getComputedStyle(document.documentElement).getPropertyValue("--red").trim();
+    sparkChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: color,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false,
+        }],
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { display: false },
+          y: { display: false },
+        },
+      },
+    });
+  }
+
+  // ── Card rendering ─────────────────────────────────────────────────────────
   function renderCard(data) {
-    const t = data.thesis || {};
     const f = data.fundamentals || {};
-    const sources = data.sources || [];
-    const rating = (t.rating || "HOLD").toUpperCase();
-    const conf = Number.isFinite(t.confidence) ? t.confidence : 0;
+    const news = data.news || [];
+    const lastClose = f.fiftyTwoWeekHigh != null ? null : null; // pulled from price_history
+    const priceHistory = data.price_history || [];
+    const lastPrice = priceHistory.length ? priceHistory[priceHistory.length - 1].close : null;
 
     const fundRows = Object.entries(f)
       .filter(([k]) => k !== "longBusinessSummary")
@@ -74,12 +114,11 @@
         return `<div class="rsh-fund-row"><span class="rsh-fund-row__k">${label}</span><span class="rsh-fund-row__v">${value}</span></div>`;
       }).join("");
 
-    const bull = (t.bull || []).map(b => `<li>${escapeHtml(b)}</li>`).join("");
-    const bear = (t.bear || []).map(b => `<li>${escapeHtml(b)}</li>`).join("");
-
-    const srcRows = sources.map(s =>
-      `<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.title || s.url)}</a></li>`
-    ).join("");
+    const newsRows = news.map(n => `
+      <div class="rsh-news-item">
+        <div class="rsh-news-item__meta">${escapeHtml(fmtDate(n.published))} · ${escapeHtml(n.publisher || "—")}</div>
+        <a class="rsh-news-item__title" href="${escapeHtml(n.link || "#")}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a>
+      </div>`).join("");
 
     const businessSummary = f.longBusinessSummary
       ? `<p class="rsh-card__about">${escapeHtml(f.longBusinessSummary)}</p>`
@@ -92,27 +131,11 @@
       <span class="rsh-card__sym">${escapeHtml(data.symbol)}</span>
       <span class="rsh-card__sector">${escapeHtml((f.sector || "—").toUpperCase())} · ${escapeHtml((f.industry || "—").toUpperCase())}</span>
     </div>
-    <div class="rsh-card__rating">
-      <span class="rating-pill rating-pill--${rating.toLowerCase()}">${rating}</span>
-      <div class="confidence">
-        <span class="confidence__label">CONFIDENCE</span>
-        <div class="confidence__bar"><div class="confidence__fill" style="width:${conf}%"></div></div>
-        <span class="confidence__num">${conf}%</span>
-      </div>
-    </div>
+    ${lastPrice != null ? `<div class="rsh-card__price dot-matrix">${fmtDollar(lastPrice)}</div>` : ""}
   </div>
 
-  <p class="rsh-card__summary">${escapeHtml(t.summary || "")}</p>
-
-  <div class="rsh-card__grid">
-    <div class="rsh-thesis rsh-thesis--bull">
-      <div class="rsh-thesis__head">▲ BULL CASE</div>
-      <ul>${bull || "<li class=\"rsh-empty\">—</li>"}</ul>
-    </div>
-    <div class="rsh-thesis rsh-thesis--bear">
-      <div class="rsh-thesis__head">▼ BEAR CASE</div>
-      <ul>${bear || "<li class=\"rsh-empty\">—</li>"}</ul>
-    </div>
+  <div class="rsh-sparkline-wrap">
+    <canvas id="rsh-sparkline"></canvas>
   </div>
 
   <div class="rsh-fundamentals">
@@ -121,12 +144,15 @@
     ${businessSummary}
   </div>
 
-  ${srcRows ? `<div class="rsh-sources"><div class="rsh-sources__head">▸ SOURCES</div><ol>${srcRows}</ol></div>` : ""}
+  ${newsRows ? `<div class="rsh-news"><div class="rsh-fundamentals__head">▸ RECENT NEWS</div>${newsRows}</div>` : ""}
 
   <div class="rsh-card__foot">
-    NOT FINANCIAL ADVICE · ${data.cached ? "CACHED" : "FRESH"} · FETCHED ${escapeHtml(data.fetched_at || "")}
+    ${data.cached ? "CACHED" : "FRESH"} · FETCHED ${escapeHtml((data.fetched_at || "").slice(0, 19).replace("T", " "))} UTC
   </div>
 </div>`;
+
+    renderSparkline(priceHistory);
+    setFooter(data.symbol, lastPrice);
   }
 
   function renderError(msg) {
@@ -139,8 +165,8 @@
     const symbol = (input.value || "").trim().toUpperCase();
     if (!symbol) return;
     submitBtn.disabled = true;
-    submitBtn.textContent = "▸ THINKING…";
-    if (status) status.textContent = "Fetching fundamentals · running web search · generating thesis…";
+    submitBtn.textContent = "▸ LOADING…";
+    if (status) status.textContent = "Fetching fundamentals and news…";
     resultEl.innerHTML = "";
 
     try {
@@ -155,7 +181,6 @@
       }
       const data = await res.json();
       renderCard(data);
-      setFooter(data.symbol, data.thesis?.rating);
       if (status) status.textContent = data.cached ? "DONE · cache hit" : "DONE";
     } catch (err) {
       renderError(`ERROR: ${err.message}`);
