@@ -1,130 +1,266 @@
-// Live tab — polls /api/state every 10s and renders bot state.
+// LIVE tab — polls /api/live (Alpaca PAPER account) every 10s and renders the
+// real account: portfolio value, today's P&L, positions, and momentum target vs held.
 
-function renderParams(data) {
-  const rows = [
-    ["Symbol", data.symbol],
-    ["Short SMA", (data.short_window || "—") + " D"],
-    ["Long SMA",  (data.long_window  || "—") + " D"],
-    ["Position size", (data.position_size_pct ?? "—") + "%"],
-    ["Stop loss",     (data.stop_loss_pct     ?? "—") + "%"],
-    ["SMA (short)", fmtDollar(data.sma_short)],
-    ["SMA (long)",  fmtDollar(data.sma_long)],
-  ];
-  const el = document.getElementById("params");
-  if (!el) return;
-  el.innerHTML = rows
-    .map(
-      ([k, v]) =>
-        `<div class="param-row"><span class="param-name">${k}</span><span class="param-value">${escapeHtml(String(v))}</span></div>`,
-    )
-    .join("");
-}
+(function () {
+  let target = null;       // momentum target {SYMBOL: weight_pct}, fetched once
+  let targetAsOf = null;
+  let liveEquityChart = null;
 
-function updateDashboard(data) {
-  const titleEl = document.getElementById("bot-title");
-  if (titleEl) titleEl.textContent = `SMA CROSSOVER · ${data.symbol || "—"}`;
+  // ── formatting ──────────────────────────────────────────────────────────────
+  const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
+  const money = (v) => fmtDollar(v);
+  const signedMoney = (v) => (v >= 0 ? "+" : "−") + fmtDollar(Math.abs(v));
+  const pct = (v) => (v >= 0 ? "+" : "") + Number(v).toFixed(2) + "%";
 
-  const dot = document.getElementById("status-dot");
-  const label = document.getElementById("status-label");
-  if (dot)   dot.className   = "dot " + (data.status === "running" ? "running" : "");
-  if (label) label.textContent = (data.status || "offline").toUpperCase();
-
-  const ret =
-    ((data.portfolio_value - data.initial_capital) / data.initial_capital) * 100;
-
-  // Live KPIs (per-tab)
-  const pv = document.getElementById("portfolio-val");
-  if (pv) pv.textContent = fmtDollar(data.portfolio_value);
-
-  const retEl = document.getElementById("total-return");
-  if (retEl) {
-    retEl.textContent = (ret >= 0 ? "+" : "") + ret.toFixed(2) + "%";
-    retEl.className = "cell__big dot-matrix " + (ret >= 0 ? "up" : "down");
+  function setBig(id, text, cssClass) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = "cell__big dot-matrix " + (cssClass || "");
   }
 
-  const cp = document.getElementById("current-price");
-  if (cp) cp.textContent = data.current_price ? fmtDollar(data.current_price) : "—";
+  // ── shared header / status bar ───────────────────────────────────────────────
+  function setHeader(d) {
+    const title = document.getElementById("bot-title");
+    if (title) title.textContent = "MOMENTUM · ALPACA PAPER";
 
-  const sh = document.getElementById("shares-held");
-  if (sh) sh.textContent = data.shares_held != null ? String(data.shares_held) : "—";
+    const dot = document.getElementById("status-dot");
+    if (dot) dot.className = "dot " + (d.connected ? "running" : "");
+    const label = document.getElementById("status-label");
+    if (label) label.textContent = d.connected ? "PAPER LIVE" : "NO KEYS";
 
-  // Top status-bar KPIs
-  const eq = document.getElementById("kpi-equity");
-  if (eq) eq.textContent = fmtDollar(data.portfolio_value, { compact: true });
+    const eq = document.getElementById("kpi-equity");
+    if (eq) eq.textContent = d.connected ? fmtDollar(d.portfolio_value) : "—";
+    const pnl = document.getElementById("kpi-pnl");
+    if (pnl) {
+      pnl.textContent = d.connected ? pct(d.pl_today_pct) : "—";
+      pnl.className = "kpi__value dot-matrix " + (d.connected ? cls(d.pl_today) : "");
+    }
+    const kp = document.getElementById("kpi-positions");
+    if (kp) kp.textContent = d.connected ? String(d.num_positions) : "—";
 
-  const pnl = document.getElementById("kpi-pnl");
-  if (pnl) {
-    pnl.textContent = (ret >= 0 ? "+" : "") + ret.toFixed(2) + "%";
-    pnl.className = "kpi__value dot-matrix " + (ret >= 0 ? "up" : "down");
-  }
-
-  const trades = data.trades || [];
-  const kt = document.getElementById("kpi-trades");
-  if (kt) kt.textContent = String(trades.length);
-
-  const closed = trades.filter((t) => t.pnl != null);
-  const wins   = closed.filter((t) => t.pnl >= 0).length;
-  const wr = closed.length ? (wins / closed.length) * 100 : null;
-  const kw = document.getElementById("kpi-winrate");
-  if (kw) kw.textContent = wr != null ? wr.toFixed(0) + "%" : "—";
-
-  // Header signal pill
-  const sigEl = document.getElementById("signal-indicator");
-  if (sigEl) {
-    if (data.signal === 1) {
-      sigEl.className = "signal-pill signal-buy";
-      sigEl.textContent = "↑ GOLDEN CROSS";
-    } else if (data.signal === -1) {
-      sigEl.className = "signal-pill signal-sell";
-      sigEl.textContent = "↓ DEATH CROSS";
-    } else {
-      sigEl.className = "signal-pill signal-hold";
-      sigEl.textContent = "— HOLD";
+    // bottom system bar (live cells)
+    const sysStrat = document.getElementById("sys-strategy");
+    if (sysStrat) sysStrat.textContent = "MOMENTUM TOP-2";
+    const sysSig = document.getElementById("sys-signal");
+    if (sysSig) {
+      sysSig.textContent = d.connected ? "CONNECTED" : "OFFLINE";
+      sysSig.className = "sys-cell__v " + (d.connected ? "up" : "down");
     }
   }
 
-  if (data.last_updated) {
-    const d = new Date(data.last_updated);
-    const lu = document.getElementById("last-updated");
-    if (lu) lu.textContent = "UPDATED " + d.toLocaleTimeString();
+  // ── setup card (no keys) ──────────────────────────────────────────────────────
+  function showSetup(note) {
+    document.getElementById("live-body").style.display = "none";
+    const setup = document.getElementById("live-setup");
+    setup.style.display = "";
+    setup.innerHTML = `
+      <div class="copy-setup__icon">⚿</div>
+      <div class="copy-setup__title">ALPACA PAPER NOT CONNECTED</div>
+      <p class="copy-setup__body">${escapeHtml(note || "Add your Alpaca paper keys to go live.")}</p>
+      <ol class="copy-setup__steps">
+        <li>Get free paper keys at <span class="copy-setup__link">alpaca.markets</span></li>
+        <li>Create a file named <code>.env</code> next to <code>server.py</code></li>
+        <li>Add <code>ALPACA_API_KEY=…</code> and <code>ALPACA_SECRET_KEY=…</code></li>
+        <li>Restart the server and reload</li>
+      </ol>`;
   }
 
-  // Bottom system bar (live cells)
-  const sysStrat = document.getElementById("sys-strategy");
-  if (sysStrat) sysStrat.textContent = `SMA · ${data.symbol || "—"}`;
-
-  const sysSig = document.getElementById("sys-signal");
-  if (sysSig) {
-    sysSig.textContent =
-      data.signal === 1 ? "BUY" : data.signal === -1 ? "SELL" : "HOLD";
-    sysSig.className =
-      "sys-cell__v " +
-      (data.signal === 1 ? "up" : data.signal === -1 ? "down" : "");
+  // ── positions table ───────────────────────────────────────────────────────────
+  function renderPositions(positions) {
+    const wrap = document.getElementById("live-positions");
+    const sub = document.getElementById("live-pos-sub");
+    if (!wrap) return;
+    if (!positions || !positions.length) {
+      wrap.innerHTML = `<div class="no-data">NO OPEN POSITIONS</div>`;
+      if (sub) sub.textContent = "0 HELD";
+      return;
+    }
+    if (sub) sub.textContent = `${positions.length} HELD`;
+    const rows = positions.map((p) => `
+      <tr>
+        <td class="copy-td copy-td--ticker">${escapeHtml(p.symbol)}</td>
+        <td class="copy-td">${p.qty}</td>
+        <td class="copy-td">${fmtDollar(p.avg_entry)}</td>
+        <td class="copy-td">${fmtDollar(p.price)}</td>
+        <td class="copy-td">${fmtDollar(p.market_value)}</td>
+        <td class="copy-td ${cls(p.unrealized_pl)}">${signedMoney(p.unrealized_pl)}</td>
+        <td class="copy-td ${cls(p.unrealized_plpc)}">${pct(p.unrealized_plpc)}</td>
+        <td class="copy-td ${cls(p.change_today_pct)}">${pct(p.change_today_pct)}</td>
+        <td class="copy-td">${p.weight_pct}%</td>
+      </tr>`).join("");
+    wrap.innerHTML = `
+      <table class="copy-table">
+        <thead><tr>
+          <th class="copy-th">SYMBOL</th>
+          <th class="copy-th">QTY</th>
+          <th class="copy-th">AVG COST</th>
+          <th class="copy-th">PRICE</th>
+          <th class="copy-th">MKT VALUE</th>
+          <th class="copy-th">UNREAL P&amp;L</th>
+          <th class="copy-th">RETURN</th>
+          <th class="copy-th">TODAY</th>
+          <th class="copy-th">WEIGHT</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
   }
 
-  buildLegend(document.getElementById("live-legend"), indicatorsFor(data));
-  buildChart("priceChart", data);
-  buildOscillatorChart("liveOscChart", "live-osc-wrap", data);
-  renderTrades("trade-log", data.trades);
-  renderParams(data);
-}
+  // ── momentum target vs held ───────────────────────────────────────────────────
+  function renderTarget(positions) {
+    const el = document.getElementById("live-target");
+    const sub = document.getElementById("live-target-sub");
+    if (!el) return;
+    if (!target) { el.innerHTML = `<div class="no-data">TARGET UNAVAILABLE</div>`; return; }
+    if (sub && targetAsOf) sub.textContent = `AS OF ${targetAsOf} · TOP-2 MONTHLY`;
 
-let lastFetchStart = 0;
-async function fetchAndUpdate() {
-  lastFetchStart = performance.now();
-  try {
-    const res = await fetch("/api/state");
-    if (!res.ok) throw new Error("API error");
-    const data = await res.json();
-    const latency = Math.max(1, Math.round(performance.now() - lastFetchStart));
-    const lat = document.getElementById("sys-latency");
-    if (lat) lat.textContent = latency + "ms";
-    updateDashboard(data);
-  } catch (e) {
-    const sl = document.getElementById("status-label");
-    if (sl) sl.textContent = "SERVER OFFLINE";
+    const held = new Set((positions || []).map((p) => p.symbol));
+    const targetSyms = Object.keys(target);
+    const chips = targetSyms.map((s) => {
+      const on = held.has(s);
+      return `<span class="live-chip ${on ? "live-chip--on" : "live-chip--off"}">${escapeHtml(s)} ${target[s]}% ${on ? "✓" : "✗"}</span>`;
+    }).join("");
+    const extra = [...held].filter((s) => !target[s]).map((s) =>
+      `<span class="live-chip live-chip--extra">${escapeHtml(s)} ⚠</span>`).join("");
+    const aligned = targetSyms.every((s) => held.has(s)) && [...held].every((s) => target[s]);
+
+    el.innerHTML = `
+      <div class="live-target__row"><span class="live-target__label">TARGET</span>${chips || "<span class='no-data'>—</span>"}</div>
+      ${extra ? `<div class="live-target__row"><span class="live-target__label">EXTRA HELD</span>${extra}</div>` : ""}
+      <div class="live-target__note ${aligned ? "up" : "down"}">
+        ${aligned ? "✓ Aligned with the momentum target." : "⚠ Drifted from target — rebalance in the MOMENTUM tab."}
+      </div>`;
   }
-}
 
-fetchAndUpdate();
-setInterval(fetchAndUpdate, 10000);
+  // ── equity chart (portfolio value over time) ─────────────────────────────────
+  function renderEquityChart(curve) {
+    const canvas = document.getElementById("live-equity-chart");
+    if (!canvas || !curve || curve.length < 2) return;
+    if (liveEquityChart) { liveEquityChart.destroy(); liveEquityChart = null; }
+    const css = getComputedStyle(document.documentElement);
+    const green = css.getPropertyValue("--green").trim();
+    const inkDim = css.getPropertyValue("--ink-dim").trim();
+    liveEquityChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: curve.map((p) => p.date),
+        datasets: [{
+          label: "EQUITY", data: curve.map((p) => p.value),
+          borderColor: green, borderWidth: 2, pointRadius: 0, tension: 0.25, fill: false,
+        }],
+      },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => " $" + Number(ctx.raw).toLocaleString(undefined, { maximumFractionDigits: 2 }) } },
+        },
+        scales: {
+          x: { ticks: { color: inkDim, font: { family: "JetBrains Mono", size: 10 }, maxTicksLimit: 8 }, grid: { color: "#1a1a18" } },
+          y: { ticks: { color: inkDim, font: { family: "JetBrains Mono", size: 10 }, callback: (v) => "$" + Number(v).toLocaleString() }, grid: { color: "#1a1a18" } },
+        },
+      },
+    });
+  }
+
+  // ── recent trades (filled orders) ────────────────────────────────────────────
+  function renderTrades(orders) {
+    const wrap = document.getElementById("live-trades");
+    const sub = document.getElementById("live-trades-sub");
+    if (!wrap) return;
+    if (!orders || !orders.length) {
+      wrap.innerHTML = `<div class="no-data">NO TRADES YET</div>`;
+      if (sub) sub.textContent = "";
+      return;
+    }
+    if (sub) sub.textContent = `${orders.length} FILLED`;
+    const rows = orders.map((o) => {
+      const buy = o.side === "buy";
+      const t = o.filled_at ? new Date(o.filled_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+      return `
+      <tr>
+        <td class="copy-td">${escapeHtml(t)}</td>
+        <td class="copy-td copy-td--ticker">${escapeHtml(o.symbol)}</td>
+        <td class="copy-td ${buy ? "up" : "down"}">${buy ? "BUY" : "SELL"}</td>
+        <td class="copy-td">${o.qty}</td>
+        <td class="copy-td">${fmtDollar(o.price)}</td>
+        <td class="copy-td">${fmtDollar(o.value)}</td>
+      </tr>`;
+    }).join("");
+    wrap.innerHTML = `
+      <table class="copy-table">
+        <thead><tr>
+          <th class="copy-th">TIME</th>
+          <th class="copy-th">SYMBOL</th>
+          <th class="copy-th">SIDE</th>
+          <th class="copy-th">QTY</th>
+          <th class="copy-th">PRICE</th>
+          <th class="copy-th">VALUE</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  async function fetchHistory() {
+    try {
+      const res = await fetch("/api/live/history");
+      const d = await res.json();
+      if (d.connected) renderEquityChart(d.curve || []);
+    } catch (_) {}
+  }
+
+  async function fetchOrders() {
+    try {
+      const res = await fetch("/api/live/orders?limit=50");
+      const d = await res.json();
+      if (d.connected) renderTrades(d.orders || []);
+    } catch (_) {}
+  }
+
+  // ── poll ──────────────────────────────────────────────────────────────────────
+  let t0 = 0;
+  async function fetchLive() {
+    t0 = performance.now();
+    try {
+      const res = await fetch("/api/live");
+      const d = await res.json();
+      const lat = document.getElementById("sys-latency");
+      if (lat) lat.textContent = Math.max(1, Math.round(performance.now() - t0)) + "ms";
+
+      setHeader(d);
+      if (!d.connected) { showSetup(d.note); return; }
+
+      document.getElementById("live-setup").style.display = "none";
+      document.getElementById("live-body").style.display = "";
+      setBig("live-portfolio-value", money(d.portfolio_value), "");
+      setBig("live-pl-today", signedMoney(d.pl_today) + " (" + pct(d.pl_today_pct) + ")", cls(d.pl_today));
+      setBig("live-open-pl", signedMoney(d.open_pl), cls(d.open_pl));
+      setBig("live-cash", money(d.cash), "");
+      renderPositions(d.positions);
+      renderTarget(d.positions);
+
+      const lu = document.getElementById("last-updated");
+      if (lu && d.updated_at) lu.textContent = "UPDATED " + new Date(d.updated_at).toLocaleTimeString();
+    } catch (e) {
+      const label = document.getElementById("status-label");
+      if (label) label.textContent = "SERVER OFFLINE";
+    }
+  }
+
+  // The momentum target changes monthly — fetch it once (it's a slower yfinance call).
+  async function fetchTarget() {
+    try {
+      const res = await fetch("/api/momentum/current");
+      const d = await res.json();
+      target = d.weights || null;
+      targetAsOf = d.as_of || null;
+    } catch (_) {}
+  }
+
+  fetchLive();                    // render the account immediately
+  fetchTarget().then(fetchLive);  // re-render once the (slower) target loads
+  fetchHistory();                 // equity chart
+  fetchOrders();                  // recent trades
+  setInterval(fetchLive, 10000);
+  setInterval(() => { fetchHistory(); fetchOrders(); }, 60000);
+})();

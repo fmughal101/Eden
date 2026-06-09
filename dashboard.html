@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-    <link rel="stylesheet" href="/static/dashboard.css?v=12" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=15" />
   </head>
   <body>
     <!-- ─────────── TOP STATUS BAR ─────────── -->
@@ -34,17 +34,12 @@
           <div class="kpi__value dot-matrix" id="kpi-pnl">—</div>
         </div>
         <div class="kpi">
-          <div class="kpi__label">TRADES</div>
-          <div class="kpi__value dot-matrix" id="kpi-trades">—</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi__label">WIN</div>
-          <div class="kpi__value dot-matrix" id="kpi-winrate">—</div>
+          <div class="kpi__label">POSITIONS</div>
+          <div class="kpi__value dot-matrix" id="kpi-positions">—</div>
         </div>
       </div>
 
       <div class="status-bar__right">
-        <div class="signal-pill" id="signal-indicator">— HOLD</div>
         <div class="status-pill">
           <span class="dot" id="status-dot"></span>
           <span id="status-label">OFFLINE</span>
@@ -70,13 +65,8 @@
           >]</span
         >
       </button>
-      <button class="tab-btn" data-tab="signals">
-        <span class="tab-bracket">[</span>SIGNALS<span class="tab-bracket"
-          >]</span
-        >
-      </button>
-      <button class="tab-btn" data-tab="research">
-        <span class="tab-bracket">[</span>RESEARCH<span class="tab-bracket"
+      <button class="tab-btn" data-tab="momentum">
+        <span class="tab-bracket">[</span>MOMENTUM<span class="tab-bracket"
           >]</span
         >
       </button>
@@ -96,61 +86,69 @@
     <main class="canvas">
       <!-- ═════════════════ LIVE TAB ═════════════════ -->
       <section id="tab-live" class="tab-content active">
-        <div class="grid-2">
-          <div class="cell">
-            <div class="cell__label">▸ PORTFOLIO VALUE</div>
-            <div class="cell__big dot-matrix" id="portfolio-val">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ TOTAL RETURN</div>
-            <div class="cell__big dot-matrix" id="total-return">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ CURRENT PRICE</div>
-            <div class="cell__big dot-matrix" id="current-price">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ SHARES HELD</div>
-            <div class="cell__big dot-matrix" id="shares-held">—</div>
-          </div>
-        </div>
+        <!-- Shown only when Alpaca keys aren't configured -->
+        <div id="live-setup" class="copy-setup" style="display: none"></div>
 
-        <div class="chart-card">
-          <div class="chart-card__head">
-            <div class="chart-card__title">▸ PRICE / SIGNALS</div>
-            <div class="chart-card__legend" id="live-legend"></div>
+        <div id="live-body" class="tab-stack">
+          <div class="grid-4">
+            <div class="cell">
+              <div class="cell__label">▸ PORTFOLIO VALUE</div>
+              <div class="cell__big dot-matrix" id="live-portfolio-value">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ TODAY'S P&amp;L</div>
+              <div class="cell__big dot-matrix" id="live-pl-today">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ OPEN P&amp;L</div>
+              <div class="cell__big dot-matrix" id="live-open-pl">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ CASH</div>
+              <div class="cell__big dot-matrix" id="live-cash">—</div>
+            </div>
           </div>
-          <div class="chart-wrap">
-            <canvas
-              id="priceChart"
-              role="img"
-              aria-label="Live price chart"
-            ></canvas>
-          </div>
-          <div class="chart-wrap chart-wrap--osc chart-wrap--empty" id="live-osc-wrap">
-            <canvas
-              id="liveOscChart"
-              role="img"
-              aria-label="Live oscillator chart"
-            ></canvas>
-          </div>
-        </div>
 
-        <div class="grid-split">
+          <div class="chart-card">
+            <div class="chart-card__head">
+              <div class="chart-card__title">▸ PORTFOLIO VALUE · TODAY</div>
+              <div class="chart-card__legend">
+                <span class="copy-legend"><i class="copy-legend__dot copy-legend__dot--port"></i>EQUITY</span>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="live-equity-chart" role="img" aria-label="Portfolio value over time"></canvas>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ POSITIONS</span>
+              <span class="panel__sub" id="live-pos-sub">—</span>
+            </div>
+            <div class="copy-table-wrap" id="live-positions">
+              <div class="no-data">NO POSITIONS</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ MOMENTUM TARGET vs HELD</span>
+              <span class="panel__sub" id="live-target-sub">TOP-2 · MONTHLY REBALANCE</span>
+            </div>
+            <div class="live-target" id="live-target">
+              <div class="no-data">LOADING TARGET…</div>
+            </div>
+          </div>
+
           <div class="panel">
             <div class="panel__head">
               <span class="panel__title">▸ RECENT TRADES</span>
-              <span class="panel__sub">TAIL · 8</span>
+              <span class="panel__sub" id="live-trades-sub">—</span>
             </div>
-            <div id="trade-log" class="terminal-table">
+            <div class="copy-table-wrap" id="live-trades">
               <div class="no-data">NO TRADES YET</div>
             </div>
-          </div>
-          <div class="panel">
-            <div class="panel__head">
-              <span class="panel__title">▸ PARAMETERS</span>
-            </div>
-            <div id="params" class="param-list"></div>
           </div>
         </div>
       </section>
@@ -206,10 +204,24 @@
               <input
                 type="number"
                 name="position_size_pct"
-                value="10"
+                value="100"
                 step="0.1"
                 min="0"
                 max="100"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">SP</span>
+              <span class="param-cell__name">SLIPPAGE</span>
+              <span class="param-cell__suffix">bps</span>
+              <input
+                type="number"
+                name="slippage_bps"
+                value="5"
+                step="0.5"
+                min="0"
                 required
                 class="param-cell__input"
               />
@@ -244,29 +256,54 @@
           <p id="bt-status" class="bt-status"></p>
         </div>
 
-        <div id="bt-results" style="display: none">
+        <div id="bt-results" class="tab-stack" style="display: none">
           <div class="grid-4">
             <div class="cell">
-              <div class="cell__label">▸ TOTAL RETURN</div>
+              <div class="cell__label">▸ STRATEGY RETURN</div>
               <div class="cell__big dot-matrix" id="bt-total-return">—</div>
             </div>
             <div class="cell">
-              <div class="cell__label">▸ FINAL CAPITAL</div>
-              <div class="cell__big dot-matrix" id="bt-final-capital">—</div>
+              <div class="cell__label">▸ VS BUY &amp; HOLD</div>
+              <div class="cell__big dot-matrix" id="bt-vs-benchmark">—</div>
             </div>
             <div class="cell">
-              <div class="cell__label">▸ WIN RATE</div>
-              <div class="cell__big dot-matrix" id="bt-win-rate">—</div>
+              <div class="cell__label">▸ MAX DRAWDOWN</div>
+              <div class="cell__big dot-matrix" id="bt-maxdd">—</div>
             </div>
             <div class="cell">
-              <div class="cell__label">▸ # TRADES</div>
-              <div class="cell__big dot-matrix" id="bt-num-trades">—</div>
+              <div class="cell__label">▸ SHARPE</div>
+              <div class="cell__big dot-matrix" id="bt-sharpe">—</div>
+            </div>
+          </div>
+
+          <div class="panel bt-compare">
+            <div class="panel__head">
+              <span class="panel__title">▸ STRATEGY vs BUY &amp; HOLD</span>
+              <span class="panel__sub" id="bt-verdict">—</span>
+            </div>
+            <div id="bt-compare-grid" class="bt-compare-grid"></div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card__head">
+              <div class="chart-card__title">▸ EQUITY CURVE vs BUY &amp; HOLD</div>
+              <div class="chart-card__legend">
+                <span class="copy-legend"><i class="copy-legend__dot copy-legend__dot--port"></i>STRATEGY</span>
+                <span class="copy-legend"><i class="copy-legend__dot copy-legend__dot--spy"></i>BUY &amp; HOLD</span>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas
+                id="bt-equity-chart"
+                role="img"
+                aria-label="Equity curve vs buy and hold"
+              ></canvas>
             </div>
           </div>
 
           <div class="chart-card">
             <div class="chart-card__head">
-              <div class="chart-card__title">▸ EQUITY / SIGNALS</div>
+              <div class="chart-card__title">▸ PRICE / SIGNALS</div>
               <div class="chart-card__legend" id="bt-legend"></div>
             </div>
             <div class="chart-wrap">
@@ -297,64 +334,128 @@
         </div>
       </section>
 
-      <!-- ═════════════════ SIGNALS TAB ═════════════════ -->
-      <section id="tab-signals" class="tab-content">
-        <div class="grid-4">
-          <div class="cell">
-            <div class="cell__label">▸ TOTAL SIGNALS</div>
-            <div class="cell__big dot-matrix" id="sig-total">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ RECEIVED</div>
-            <div class="cell__big dot-matrix" id="sig-received">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ EXECUTED</div>
-            <div class="cell__big dot-matrix" id="sig-executed">—</div>
-          </div>
-          <div class="cell">
-            <div class="cell__label">▸ REJECTED</div>
-            <div class="cell__big dot-matrix" id="sig-rejected">—</div>
-          </div>
-        </div>
-
+      <!-- ═════════════════ MOMENTUM TAB ═════════════════ -->
+      <section id="tab-momentum" class="tab-content">
         <div class="panel">
           <div class="panel__head">
-            <span class="panel__title">▸ SIGNAL LOG</span>
-            <span class="panel__sub" id="sig-updated">—</span>
+            <span class="panel__title">▸ MOMENTUM PORTFOLIO</span>
+            <span class="panel__sub"
+              >ROTATE INTO STRENGTH · DEFENSIVE TO BONDS · MONTHLY REBALANCE</span
+            >
           </div>
-          <div id="signal-log" class="terminal-table">
-            <div class="no-data">NO SIGNALS RECEIVED YET</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ═════════════════ RESEARCH TAB ═════════════════ -->
-      <section id="tab-research" class="tab-content">
-        <div class="panel">
-          <div class="panel__head">
-            <span class="panel__title">▸ TICKER RESEARCH</span>
-            <span class="panel__sub">FUNDAMENTALS · NEWS · YFINANCE</span>
-          </div>
-          <form id="research-form" class="research-form">
-            <input
-              id="research-symbol"
-              name="symbol"
-              placeholder="ENTER SYMBOL (e.g. AAPL)"
-              required
-              autocomplete="off"
-              spellcheck="false"
-              maxlength="16"
-              class="research-form__input"
-            />
-            <button type="submit" id="research-submit" class="run-btn">
-              ▸ RESEARCH
+          <form id="momentum-form" class="param-bar">
+            <div class="param-cell">
+              <span class="param-cell__num">BK</span>
+              <span class="param-cell__name">BASKET</span>
+              <span class="param-cell__static">SPY·QQQ·EFA·GLD → AGG</span>
+            </div>
+            <label class="param-cell">
+              <span class="param-cell__num">N</span>
+              <span class="param-cell__name">TOP N</span>
+              <input
+                type="number"
+                name="top_n"
+                value="2"
+                min="1"
+                max="4"
+                step="1"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">LB</span>
+              <span class="param-cell__name">LOOKBACK</span>
+              <span class="param-cell__suffix">mo</span>
+              <input
+                type="number"
+                name="lookback"
+                value="12"
+                min="3"
+                max="24"
+                step="1"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <label class="param-cell">
+              <span class="param-cell__num">SP</span>
+              <span class="param-cell__name">SLIPPAGE</span>
+              <span class="param-cell__suffix">bps</span>
+              <input
+                type="number"
+                name="cost_bps"
+                value="5"
+                min="0"
+                step="0.5"
+                required
+                class="param-cell__input"
+              />
+            </label>
+            <button type="submit" id="mom-run" class="run-btn">
+              ▸ RUN BACKTEST
             </button>
           </form>
-          <p id="research-status" class="bt-status"></p>
+          <p id="mom-status" class="bt-status"></p>
         </div>
 
-        <div id="research-result"></div>
+        <div id="mom-results" style="display: none">
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ HOLD NOW</span>
+              <span class="panel__sub" id="mom-asof">—</span>
+            </div>
+            <div id="mom-current" class="mom-current"></div>
+            <div class="mom-rebal-bar">
+              <button type="button" id="mom-preview-btn" class="run-btn run-btn--sm">
+                ▸ PREVIEW REBALANCE (PAPER)
+              </button>
+              <span id="mom-rebal-status" class="bt-status"></span>
+            </div>
+            <div id="mom-rebal"></div>
+          </div>
+
+          <div class="grid-4">
+            <div class="cell">
+              <div class="cell__label">▸ CAGR</div>
+              <div class="cell__big dot-matrix" id="mom-cagr">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ MAX DRAWDOWN</div>
+              <div class="cell__big dot-matrix" id="mom-maxdd">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ SHARPE</div>
+              <div class="cell__big dot-matrix" id="mom-sharpe">—</div>
+            </div>
+            <div class="cell">
+              <div class="cell__label">▸ LESS DRAWDOWN vs SPY</div>
+              <div class="cell__big dot-matrix" id="mom-vs">—</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel__head">
+              <span class="panel__title">▸ STRATEGY COMPARISON</span>
+              <span class="panel__sub" id="mom-period">—</span>
+            </div>
+            <div class="copy-table-wrap" id="mom-compare"></div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card__head">
+              <div class="chart-card__title">▸ GROWTH OF $10,000 (LOG SCALE)</div>
+              <div class="chart-card__legend" id="mom-legend"></div>
+            </div>
+            <div class="chart-wrap">
+              <canvas
+                id="mom-chart"
+                role="img"
+                aria-label="Momentum strategy equity curves vs benchmarks"
+              ></canvas>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ═════════════════ COPY TAB ═════════════════ -->
@@ -408,33 +509,6 @@
         <span class="sys-cell__v" id="bt-sys-lastrun">—</span></span
       >
 
-      <!-- SIGNALS-only -->
-      <span class="sys-cell sys-cell--tab" data-tab="signals"
-        ><span class="sys-cell__k">SOURCE</span>
-        <span class="sys-cell__v" id="sig-sys-source">TRADINGVIEW</span></span
-      >
-      <span class="sys-cell sys-cell--tab" data-tab="signals"
-        ><span class="sys-cell__k">TODAY</span>
-        <span class="sys-cell__v" id="sig-sys-today">0</span></span
-      >
-      <span class="sys-cell sys-cell--tab" data-tab="signals"
-        ><span class="sys-cell__k">LAST</span>
-        <span class="sys-cell__v" id="sig-sys-last">—</span></span
-      >
-
-      <!-- RESEARCH-only -->
-      <span class="sys-cell sys-cell--tab" data-tab="research"
-        ><span class="sys-cell__k">SOURCE</span>
-        <span class="sys-cell__v">YFINANCE</span></span
-      >
-      <span class="sys-cell sys-cell--tab" data-tab="research"
-        ><span class="sys-cell__k">TICKER</span>
-        <span class="sys-cell__v" id="rsh-sys-ticker">—</span></span
-      >
-      <span class="sys-cell sys-cell--tab" data-tab="research"
-        ><span class="sys-cell__k">PRICE</span>
-        <span class="sys-cell__v" id="rsh-sys-price">—</span></span
-      >
 
       <!-- COPY-only -->
       <span class="sys-cell sys-cell--tab" data-tab="copy"
@@ -464,11 +538,10 @@
     <script src="/static/js/ticker.js?v=2"></script>
     <script src="/static/js/tabs.js"></script>
     <script src="/static/js/footer.js?v=1"></script>
-    <script src="/static/js/live.js?v=3"></script>
+    <script src="/static/js/live.js?v=9"></script>
     <script src="/static/js/composite_builder.js?v=2"></script>
-    <script src="/static/js/backtest.js?v=4"></script>
-    <script src="/static/js/signals.js?v=2"></script>
-    <script src="/static/js/research.js?v=2"></script>
-    <script src="/static/js/copy.js?v=11"></script>
+    <script src="/static/js/backtest.js?v=6"></script>
+    <script src="/static/js/momentum.js?v=2"></script>
+    <script src="/static/js/copy.js?v=13"></script>
   </body>
 </html>

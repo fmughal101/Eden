@@ -509,6 +509,8 @@ ${sourceSwitchHtml()}
   </div>
   <div id="sim-sizing" class="copy-sizing"></div>
   <div class="chart-wrap copy-chart-wrap"><canvas id="copy-chart"></canvas></div>
+  <div id="copy-verdict" class="copy-verdict"></div>
+  <div id="copy-risk" class="copy-risk"></div>
 </div>
 
 <div class="panel copy-detail-panel copy-collapsible">
@@ -632,6 +634,34 @@ ${sourceSwitchHtml()}
             ? `SIZING: <b>MIRROR</b> — each buy weighted by the ${activeSource === "superinvestors" ? "manager's 13F position change" : "member's disclosed dollar size"} · $${Number(capital).toLocaleString()} across ${data.num_buys} buys · no margin`
             : `SIZING: <b>EQUAL</b> — <b>$${Number(data.position_size).toLocaleString(undefined, { maximumFractionDigits: 0 })}</b> per buy · $${Number(capital).toLocaleString()} ÷ ${data.num_buys} buys · no margin`)
         : "";
+    }
+
+    // Honest verdict: would copying them actually have beaten just holding SPY, after costs?
+    const vs = data.vs_benchmark, m = data.metrics, sm = data.spy_metrics;
+    const hasCurve = (data.equity_curve || []).length > 1;
+    const vEl = document.getElementById("copy-verdict");
+    if (vEl) {
+      vEl.innerHTML = (vs && hasCurve)
+        ? `<span class="${vs.beats_benchmark ? "up" : "down"}">${vs.beats_benchmark ? "▲ WOULD HAVE BEATEN" : "▼ WOULD HAVE LOST TO"} BUY &amp; HOLD</span>`
+          + ` by ${Math.abs(vs.excess_return_pct).toFixed(1)}% · `
+          + `${(vs.dd_improvement_pct || 0) > 0 ? "smaller" : "larger"} drawdown · after ${data.cost_bps != null ? data.cost_bps : 5} bps costs`
+        : "";
+    }
+    const rEl = document.getElementById("copy-risk");
+    if (rEl) {
+      if (m && sm && hasCurve) {
+        const row = (label, you, spy, better) =>
+          `<div class="copy-risk-row"><span class="copy-risk-k">${label}</span>`
+          + `<span class="copy-risk-you ${better ? "up" : ""}">${you}</span>`
+          + `<span class="copy-risk-spy">${spy}</span></div>`;
+        rEl.innerHTML =
+          `<div class="copy-risk-row copy-risk-head"><span class="copy-risk-k"></span><span class="copy-risk-you">YOU</span><span class="copy-risk-spy">SPY</span></div>`
+          + row("MAX DRAWDOWN", "−" + m.max_drawdown_pct + "%", "−" + sm.max_drawdown_pct + "%", m.max_drawdown_pct < sm.max_drawdown_pct)
+          + row("SHARPE", Number(m.sharpe).toFixed(2), Number(sm.sharpe).toFixed(2), m.sharpe > sm.sharpe)
+          + row("SORTINO", Number(m.sortino).toFixed(2), Number(sm.sortino).toFixed(2), m.sortino > sm.sortino);
+      } else {
+        rEl.innerHTML = "";
+      }
     }
 
     renderEquityChart(data.equity_curve, data.spy_curve, capital);

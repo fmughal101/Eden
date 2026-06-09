@@ -2,6 +2,12 @@
 // POSTs to /api/backtest, renders results.
 
 let strategiesData = [];
+let btEquityChart = null;
+
+// Formatting helpers
+const btSigned = (v) => (v == null || isNaN(v)) ? "—" : (v >= 0 ? "+" : "") + Number(v).toFixed(1) + "%";
+const btPct = (v) => (v == null || isNaN(v)) ? "—" : Number(v).toFixed(1) + "%";
+const btNum = (v) => (v == null || isNaN(v)) ? "—" : Number(v).toFixed(2);
 
 function renderStrategyParams() {
   const select = document.getElementById("bt-strategy");
@@ -80,24 +86,121 @@ async function loadStrategies() {
   renderStrategyParams();
 }
 
-function renderBacktestResults(data) {
-  document.getElementById("bt-results").style.display = "flex";
-  document.getElementById("bt-results").style.flexDirection = "column";
-  document.getElementById("bt-results").style.gap = "20px";
+function renderCompareGrid(data) {
+  const wrap = document.getElementById("bt-compare-grid");
+  if (!wrap) return;
+  const m = data.metrics || {};
+  const b = data.benchmark || {};
+  const cmp = [
+    ["TOTAL RETURN", btSigned(m.total_return_pct), btSigned(b.total_return_pct)],
+    ["CAGR", btSigned(m.cagr_pct), btSigned(b.cagr_pct)],
+    ["MAX DRAWDOWN", "−" + btPct(m.max_drawdown_pct), "−" + btPct(b.max_drawdown_pct)],
+    ["SHARPE", btNum(m.sharpe), btNum(b.sharpe)],
+    ["SORTINO", btNum(m.sortino), btNum(b.sortino)],
+    ["VOLATILITY", btPct(m.volatility_pct), btPct(b.volatility_pct)],
+    ["EXPOSURE", m.exposure_pct != null ? btPct(m.exposure_pct) : "—", "100.0%"],
+  ];
+  const cmpRows = cmp.map(([k, s, h]) =>
+    `<div class="bt-cmp-row"><span class="bt-cmp-k">${k}</span><span class="bt-cmp-s">${s}</span><span class="bt-cmp-h">${h}</span></div>`).join("");
+  const costs = data.costs || {};
+  const extra = [
+    ["WIN RATE", data.win_rate_pct != null ? data.win_rate_pct.toFixed(0) + "%" : "—"],
+    ["# TRADES", String(data.num_trades)],
+    ["FINAL CAPITAL", fmtDollar(data.final_capital)],
+    ["COSTS", (costs.slippage_bps != null ? costs.slippage_bps : 0) + " bps/fill"],
+  ];
+  const extraRows = extra.map(([k, v]) =>
+    `<div class="bt-cmp-row bt-cmp-row--single"><span class="bt-cmp-k">${k}</span><span class="bt-cmp-s">${v}</span></div>`).join("");
+  wrap.innerHTML = `
+    <div class="bt-cmp-row bt-cmp-head"><span class="bt-cmp-k"></span><span class="bt-cmp-s">STRATEGY</span><span class="bt-cmp-h">BUY &amp; HOLD</span></div>
+    ${cmpRows}
+    <div class="bt-cmp-sep"></div>
+    ${extraRows}`;
+}
 
+function renderBtEquityChart(curve, benchCurve) {
+  const canvas = document.getElementById("bt-equity-chart");
+  if (!canvas || !curve || curve.length < 2) return;
+  if (btEquityChart) { btEquityChart.destroy(); btEquityChart = null; }
+  const css = getComputedStyle(document.documentElement);
+  const green = css.getPropertyValue("--green").trim();
+  const blue = css.getPropertyValue("--blue").trim();
+  const inkDim = css.getPropertyValue("--ink-dim").trim();
+  btEquityChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: curve.map((p) => p.date),
+      datasets: [
+        { label: "STRATEGY", data: curve.map((p) => p.value), borderColor: green, borderWidth: 2, pointRadius: 0, tension: 0.2, fill: false },
+        {
+          label: "BUY & HOLD",
+          data: (benchCurve && benchCurve.length === curve.length) ? benchCurve.map((p) => p.value) : curve.map(() => null),
+          borderColor: blue, borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, tension: 0.2, fill: false,
+        },
+      ],
+    },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => " $" + Number(ctx.raw).toLocaleString(undefined, { maximumFractionDigits: 0 }) } },
+      },
+      scales: {
+        x: { ticks: { color: inkDim, font: { family: "JetBrains Mono", size: 10 }, maxTicksLimit: 8 }, grid: { color: "#1a1a18" } },
+        y: { ticks: { color: inkDim, font: { family: "JetBrains Mono", size: 10 }, callback: (v) => "$" + Number(v).toLocaleString() }, grid: { color: "#1a1a18" } },
+      },
+    },
+  });
+}
+
+function renderBacktestResults(data) {
+  const results = document.getElementById("bt-results");
+  results.style.display = "";  // reveal — CSS .tab-stack handles flex column + 20px gap
+
+  const m = data.metrics || {};
+  const vs = data.vs_benchmark || {};
+
+  // Headline: strategy return
   const ret = data.total_return_pct;
   const retEl = document.getElementById("bt-total-return");
   retEl.textContent = (ret >= 0 ? "+" : "") + ret.toFixed(2) + "%";
   retEl.className = "cell__big dot-matrix " + (ret >= 0 ? "up" : "down");
 
-  document.getElementById("bt-final-capital").textContent = fmtDollar(
-    data.final_capital,
-  );
-  document.getElementById("bt-win-rate").textContent =
-    data.win_rate_pct.toFixed(1) + "%";
-  document.getElementById("bt-num-trades").textContent = String(
-    data.num_trades,
-  );
+  // The verdict: excess return vs buy & hold
+  const excess = vs.excess_return_pct;
+  const vsEl = document.getElementById("bt-vs-benchmark");
+  if (vsEl) {
+    vsEl.textContent = btSigned(excess);
+    vsEl.className = "cell__big dot-matrix " + (vs.beats_benchmark ? "up" : "down");
+  }
+
+  // Max drawdown (always a loss → shown negative, red)
+  const ddEl = document.getElementById("bt-maxdd");
+  if (ddEl) {
+    ddEl.textContent = m.max_drawdown_pct != null ? "−" + Number(m.max_drawdown_pct).toFixed(1) + "%" : "—";
+    ddEl.className = "cell__big dot-matrix down";
+  }
+
+  // Sharpe (green if ≥1, red if negative)
+  const shEl = document.getElementById("bt-sharpe");
+  if (shEl) {
+    shEl.textContent = btNum(m.sharpe);
+    shEl.className = "cell__big dot-matrix " + (m.sharpe >= 1 ? "up" : m.sharpe < 0 ? "down" : "");
+  }
+
+  // Plain-language verdict in the comparison panel header
+  const verdictEl = document.getElementById("bt-verdict");
+  if (verdictEl) {
+    const beat = vs.beats_benchmark;
+    const ddBetter = (vs.dd_improvement_pct || 0) > 0;
+    verdictEl.textContent = beat
+      ? `BEAT BUY & HOLD BY ${btSigned(excess)} · ${ddBetter ? "SMALLER" : "LARGER"} DRAWDOWN`
+      : `LOST TO BUY & HOLD BY ${btPct(Math.abs(excess))} · ${ddBetter ? "SMALLER" : "LARGER"} DRAWDOWN`;
+    verdictEl.className = "panel__sub " + (beat ? "up" : "down");
+  }
+
+  renderCompareGrid(data);
+  renderBtEquityChart(data.equity_curve, (data.benchmark || {}).equity_curve);
 
   buildLegend(document.getElementById("bt-legend"), indicatorsFor(data));
   buildChart("bt-chart", data);
@@ -157,6 +260,7 @@ if (form) {
       params: params,
       stop_loss_pct: Number(form.stop_loss_pct.value),
       position_size_pct: Number(form.position_size_pct.value),
+      slippage_bps: Number(form.slippage_bps.value),
       initial_capital: Number(form.initial_capital.value),
       period: form.period.value,
     };

@@ -1,24 +1,19 @@
 """
 Dashboard Server
 ================
-Serves the dashboard HTML, exposes bot state + journal API, and receives
-TradingView webhooks.
+Serves the dashboard HTML and exposes the bot state, market data, strategy,
+and copy-trading APIs.
 
 Install:  pip install fastapi uvicorn
 Run:      python server.py
 Open:     http://localhost:8000
-
-Webhook secret: set env var TV_WEBHOOK_SECRET before running, e.g.
-  PowerShell:  $env:TV_WEBHOOK_SECRET = "your-long-random-string"
-  Bash:        export TV_WEBHOOK_SECRET="your-long-random-string"
 """
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,10 +23,10 @@ import yfinance as yf
 
 import backtest as bt_engine
 import strategies as strategies_pkg
-import journal
-import research as research_module
 import congress_data
 import superinvestor_data
+import portfolio
+import momentum_live
 
 app = FastAPI()
 
@@ -45,9 +40,6 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 DATA_FILE = Path("data.json")
-WEBHOOK_SECRET = os.getenv("TV_WEBHOOK_SECRET", "change-me-in-production")
-
-journal.init_db()
 
 
 def read_bot_data() -> dict:
@@ -84,7 +76,11 @@ class BacktestRequest(BaseModel):
     symbol: str = "SPY"
     params: dict = {}
     stop_loss_pct: float = 3.0
-    position_size_pct: float = 10.0
+    # Backtests default to FULL deployment so the result answers "did this beat
+    # holding the market?" (live risk sizing is a separate config). The benchmark
+    # mirrors whatever fraction is used, so the comparison stays fair either way.
+    position_size_pct: float = 100.0
+    slippage_bps: float = 5.0          # per-fill cost (Alpaca equities are commission-free)
     initial_capital: float = 10_000.0
     period: str = "2y"
 
@@ -100,6 +96,7 @@ def backtest_endpoint(req: BacktestRequest):
             stop_loss_pct=req.stop_loss_pct / 100.0,
             position_size_pct=req.position_size_pct / 100.0,
             initial_capital=req.initial_capital,
+            slippage_bps=req.slippage_bps,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -109,6 +106,54 @@ def backtest_endpoint(req: BacktestRequest):
 @app.get("/api/strategies")
 def list_strategies():
     return JSONResponse({"strategies": strategies_pkg.list_all()})
+
+
+# ─────────────────────────────────────────────
+#  MOMENTUM PORTFOLIO (multi-asset, validated)
+# ─────────────────────────────────────────────
+
+class MomentumRequest(BaseModel):
+    top_n: int = 2
+    lookback: int = 12          # months
+    cost_bps: float = 5.0
+
+
+@app.post("/api/momentum/backtest")
+def momentum_backtest(req: MomentumRequest):
+    try:
+        return JSONResponse(portfolio.backtest_api(
+            top_n=req.top_n, lookback=req.lookback, cost_bps=req.cost_bps))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/momentum/current")
+def momentum_current(top_n: int = 2, lookback: int = 12):
+    """What the strategy says to hold right now (the live signal)."""
+    try:
+        return JSONResponse(portfolio.current_target(top_n=top_n, lookback=lookback))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/momentum/rebalance/preview")
+def momentum_rebalance_preview(top_n: int = 2, lookback: int = 12):
+    """Compute the exact paper orders to reach target — places nothing."""
+    try:
+        return JSONResponse(momentum_live.preview(top_n=top_n, lookback=lookback))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/momentum/rebalance/execute")
+def momentum_rebalance_execute(req: MomentumRequest):
+    """Submit the rebalance orders to the Alpaca PAPER account (explicit confirm)."""
+    try:
+        return JSONResponse(momentum_live.execute(top_n=req.top_n, lookback=req.lookback))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # ─────────────────────────────────────────────
@@ -154,22 +199,6 @@ def _fetch_quotes() -> list[dict]:
     return quotes
 
 
-class ResearchRequest(BaseModel):
-    symbol: str = Field(..., min_length=1, max_length=16)
-
-
-@app.post("/api/research")
-def research_endpoint(req: ResearchRequest):
-    try:
-        return JSONResponse(research_module.research(req.symbol))
-    except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Research failed: {e}")
-
-
 @app.get("/api/quotes")
 def get_quotes():
     now = time.time()
@@ -189,104 +218,6 @@ def get_quotes():
         _quotes_cache["data"] = quotes
         _quotes_cache["expires"] = now + _QUOTES_TTL_SECONDS
     return JSONResponse({"quotes": quotes, "cached": False})
-
-
-# ─────────────────────────────────────────────
-#  TRADINGVIEW WEBHOOK
-# ─────────────────────────────────────────────
-
-ALLOWED_ACTIONS = {"BUY", "SELL", "CLOSE"}
-
-
-class TradingViewSignal(BaseModel):
-    symbol: str = Field(..., min_length=1, max_length=16)
-    action: str
-    price: float | None = None
-    stop: float | None = None
-    strategy: str | None = None
-
-
-@app.post("/webhook/tradingview")
-async def tradingview_webhook(
-    request: Request,
-    x_webhook_secret: str | None = Header(default=None),
-):
-    # Read raw body first so we can log even malformed payloads
-    raw_bytes = await request.body()
-    try:
-        payload = json.loads(raw_bytes.decode("utf-8"))
-    except Exception:
-        journal.log_signal(
-            source="tradingview",
-            payload={"raw": raw_bytes.decode("utf-8", errors="replace")},
-            status="rejected",
-            notes="Invalid JSON",
-        )
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    # Authenticate — secret accepted via header OR payload.secret field
-    provided = x_webhook_secret or payload.get("secret")
-    if provided != WEBHOOK_SECRET:
-        journal.log_signal(
-            source="tradingview",
-            payload=payload,
-            status="rejected",
-            notes="Bad or missing secret",
-        )
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    # Strip the secret from the payload we log (don't store it in plaintext)
-    safe_payload = {k: v for k, v in payload.items() if k != "secret"}
-
-    try:
-        signal = TradingViewSignal(**safe_payload)
-    except Exception as e:
-        journal.log_signal(
-            source="tradingview",
-            payload=safe_payload,
-            status="rejected",
-            notes=f"Schema error: {e}",
-        )
-        raise HTTPException(status_code=400, detail=f"Invalid signal: {e}")
-
-    action = signal.action.upper().strip()
-    if action not in ALLOWED_ACTIONS:
-        journal.log_signal(
-            source="tradingview",
-            payload=safe_payload,
-            status="rejected",
-            notes=f"Unknown action '{signal.action}' (expected BUY/SELL/CLOSE)",
-            symbol=signal.symbol,
-            action=signal.action,
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=f"action must be one of {sorted(ALLOWED_ACTIONS)}",
-        )
-
-    signal_id = journal.log_signal(
-        source="tradingview",
-        payload=safe_payload,
-        status="received",
-        symbol=signal.symbol.upper(),
-        action=action,
-        price=signal.price,
-        stop=signal.stop,
-        strategy=signal.strategy,
-    )
-
-    # Step 2 (next iteration) will place the Alpaca paper order here and
-    # call journal.update_signal(signal_id, status="executed", order_id=..., ...)
-
-    return {"ok": True, "signal_id": signal_id, "status": "received"}
-
-
-@app.get("/api/signals")
-def list_signals(limit: int = 100):
-    return JSONResponse({
-        "signals": journal.get_recent_signals(limit=limit),
-        "stats":   journal.get_signal_stats(),
-    })
 
 
 # ─────────────────────────────────────────────
@@ -394,6 +325,33 @@ def superinvestors_simulate(req: SimulateRequest):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/api/live")
+def live_account():
+    """Live Alpaca paper account state for the LIVE tab."""
+    try:
+        return JSONResponse(momentum_live.account_snapshot())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/live/history")
+def live_history():
+    """Account equity curve over time (for the LIVE chart)."""
+    try:
+        return JSONResponse(momentum_live.portfolio_history())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/live/orders")
+def live_orders(limit: int = 50):
+    """The account's recent filled trades (for the LIVE trades table)."""
+    try:
+        return JSONResponse(momentum_live.recent_orders(limit=limit))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
     html = Path("dashboard.html").read_text(encoding="utf-8")
@@ -401,7 +359,4 @@ def dashboard():
 
 
 if __name__ == "__main__":
-    if WEBHOOK_SECRET == "change-me-in-production":
-        print("\n⚠️  WARNING: TV_WEBHOOK_SECRET env var is not set. Using default.")
-        print("   Set it before going live:  $env:TV_WEBHOOK_SECRET = \"...\"\n")
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

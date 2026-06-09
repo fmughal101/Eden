@@ -38,6 +38,8 @@ from typing import Optional
 import requests
 import yfinance as yf
 
+import metrics  # shared honest metrics (drawdown / Sharpe / vs-benchmark)
+
 
 # ── .env loader (no external dependency) ───────────────────────────────────────
 
@@ -833,7 +835,8 @@ def _member_return(trades: list, price_series: dict, today: date) -> Optional[fl
 
 def _follow_simulate(trades: list, capital: float, price_series: dict, today: date,
                      date_field: str = "disclosed", sizing: str = "equal",
-                     with_curve: bool = True, with_positions: bool = False) -> dict:
+                     with_curve: bool = True, with_positions: bool = False,
+                     cost_bps: float = 5.0) -> dict:
     """
     Event-driven portfolio that mirrors a member's trades in chronological order.
 
@@ -905,6 +908,8 @@ def _follow_simulate(trades: list, capital: float, price_series: dict, today: da
     ei = 0
     equity_curve, spy_curve = [], []
 
+    slip = cost_bps / 10_000.0  # follower pays slippage on every fill (buy-hold doesn't)
+
     def do_event(e):
         nonlocal cash
         prices = price_series.get(e["ticker"], {})
@@ -912,24 +917,26 @@ def _follow_simulate(trades: list, capital: float, price_series: dict, today: da
         if not px or px <= 0:
             return
         if e["type"] == "Purchase":
+            buy_px = px * (1 + slip)            # pay up on the buy
             spend = min(e["target"], cash)
             if spend > 0:
-                holdings[e["ticker"]] = holdings.get(e["ticker"], 0.0) + spend / px
+                holdings[e["ticker"]] = holdings.get(e["ticker"], 0.0) + spend / buy_px
                 cash -= spend
                 lots.append({"ticker": e["ticker"], "buy_date": str(e["date"]),
-                             "buy_price": round(px, 2), "invested": round(spend, 2),
-                             "shares": spend / px, "open": True,
+                             "buy_price": round(buy_px, 2), "invested": round(spend, 2),
+                             "shares": spend / buy_px, "open": True,
                              "exit_date": None, "exit_price": None})
         else:
             sh = holdings.get(e["ticker"], 0.0)
             if sh > 0:
-                cash += sh * px
+                sell_px = px * (1 - slip)        # take less on the sell
+                cash += sh * sell_px
                 holdings[e["ticker"]] = 0.0
                 for lot in lots:
                     if lot["ticker"] == e["ticker"] and lot["open"]:
                         lot["open"] = False
                         lot["exit_date"] = str(e["date"])
-                        lot["exit_price"] = round(px, 2)
+                        lot["exit_price"] = round(sell_px, 2)
 
     total = capital
     for gd in grid:
@@ -998,20 +1005,36 @@ def _price_series_for(trades: list, today: date, date_field: str = "disclosed") 
     return {tk: _get_prices(tk, start_date, today) for tk in tickers}, start_date
 
 
-def _simulate(trades: list, capital: float, sizing: str = "equal") -> dict:
+def _simulate(trades: list, capital: float, sizing: str = "equal",
+              cost_bps: float = 5.0) -> dict:
     """YOUR follow-simulation: entered on disclosure dates, with the weekly equity
     + SPY curves and a per-position breakdown (detail view). ``sizing`` is "equal"
-    (capital split evenly per buy) or "amount" (mirror the member's disclosed size)."""
+    (capital split evenly per buy) or "amount" (mirror the member's disclosed size).
+
+    Now also answers the honest question — *would copying them have beaten just
+    holding SPY, after costs?* — via the shared ``metrics`` engine (drawdown /
+    Sharpe / Sortino for you and SPY, plus a vs-benchmark verdict)."""
     today = date.today()
     price_series, start_date = _price_series_for(trades, today, "disclosed")
+    empty_m = metrics.compute([])
     if not price_series:
         return {"equity_curve": [], "spy_curve": [], "positions": [],
                 "total_return_pct": 0.0, "final_value": round(capital, 2),
-                "position_size": None, "num_buys": 0}
-    return _follow_simulate(trades, capital, price_series, today,
-                            date_field="disclosed",
-                            sizing="amount" if sizing == "amount" else "equal",
-                            with_curve=True, with_positions=True)
+                "position_size": None, "num_buys": 0,
+                "metrics": empty_m, "spy_metrics": empty_m,
+                "vs_benchmark": metrics.vs_benchmark(empty_m, empty_m),
+                "cost_bps": cost_bps}
+    res = _follow_simulate(trades, capital, price_series, today,
+                           date_field="disclosed",
+                           sizing="amount" if sizing == "amount" else "equal",
+                           with_curve=True, with_positions=True, cost_bps=cost_bps)
+    you = metrics.compute(res.get("equity_curve") or [])
+    spy = metrics.compute(res.get("spy_curve") or [])
+    res["metrics"] = you
+    res["spy_metrics"] = spy
+    res["vs_benchmark"] = metrics.vs_benchmark(you, spy)
+    res["cost_bps"] = cost_bps
+    return res
 
 
 def _spy_return_6mo() -> Optional[float]:
